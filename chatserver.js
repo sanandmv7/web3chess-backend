@@ -1,6 +1,6 @@
 const WebSocket = require("ws");
 
-const wss = new WebSocket.Server({ port: 4001 });
+const wss = new WebSocket.Server({ port: 3000 });
 
 // Helper function to create message strings
 const createMessage = (cmd, args) => {
