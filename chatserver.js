@@ -96,4 +96,4 @@ function broadcastToGame(gameCode, message) {
   }
 }
 
-console.log("WebSocket server started on ws://127.0.0.1:4001");
+console.log("WebSocket server started on ws://127.0.0.1:3000");
