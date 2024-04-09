@@ -8,7 +8,6 @@ const createMessage = (cmd, args) => {
 };
 
 const games = {}; // Store game states
-let activeGameIds = [];
 
 wss.on("connection", function connection(ws) {
   console.log("A new client connected!");
@@ -39,20 +38,6 @@ wss.on("connection", function connection(ws) {
       case "chat":
         const [gameCode, pubKey, chatMessage, isBlack, isWhite, amount, ts] =
           rest;
-        // if (!games[gameCode]) {
-        //     games[gameCode] = {
-        //         players: [ws],
-        //         pubKeys: [pubKey],
-        //         messageCached: createMessage("chat", [gameCode, pubKey, chatMessage, isBlack, isWhite, amount]),
-        //     }
-        // } else {
-        //     const game = games[gameCode];
-        //     if (game.players.length < 2) {
-        //         game.players.push(ws);
-        //         game.pubKeys.push(pubKey);
-        //         ws.send(game.messageCached);
-        //     }
-        // }
         // Logic to handle chat message
         const chatPayload = createMessage("chat", [
           gameCode,
@@ -81,18 +66,12 @@ wss.on("connection", function connection(ws) {
 function broadcastToGame(gameCode, message) {
   const game = games[gameCode];
   if (game) {
-    // const payload = JSON.stringify(message);
     // Sending message to all players and observers in the game
     game.players.forEach((client) => {
       if (client.readyState === WebSocket.OPEN) {
         client.send(message);
       }
     });
-    // (game.observers || []).forEach(observer => {
-    //   if (observer.readyState === WebSocket.OPEN) {
-    //     observer.send(payload);
-    //   }
-    // });
   }
 }
 

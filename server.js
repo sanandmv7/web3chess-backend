@@ -90,16 +90,39 @@ wss.on("connection", function connection(ws) {
         break;
 
       case "get_active_games":
-        const activeGameId = activeGameIds[activeGameIds.length - 1];
-        if (activeGameId) {
-          const gameInfo = games[activeGameId];
+        if (activeGameIds.length > 0) {
+          activeGameIds.forEach((gameId) => {
+            const gameInfo = games[gameId];
+            if (gameInfo) {
+              ws.send(
+                createMessage("active", [
+                  gameId,
+                  gameInfo.pubKeys[0],
+                  gameInfo.pubKeys[1],
+                ])
+              );
+            }
+          });
+        } else {
           ws.send(
-            createMessage("active", [
-              activeGameId,
-              gameInfo.pubKeys[0],
-              gameInfo.pubKeys[1],
-            ])
+            createMessage("no_active_games", ["No active games at the moment."])
           );
+        }
+        break;
+
+      case "game_over":
+        const [gameCodeOver] = rest;
+        // Find the index of the game code in the active games array
+        const index = activeGameIds.indexOf(gameCodeOver);
+        if (index !== -1) {
+          // If the game code is found, remove it from the active games array
+          activeGameIds.splice(index, 1);
+          console.log(
+            `Game ${gameCodeOver} is over and removed from active games.`
+          );
+        } else {
+          // If the game code is not found, possibly log or handle the error
+          console.log(`Game ${gameCodeOver} not found in active games.`);
         }
         break;
 
@@ -120,12 +143,6 @@ wss.on("connection", function connection(ws) {
         } else {
           ws.send(createMessage("error", ["Game does not exist."]));
         }
-        break;
-      case "chat":
-        const [gameCode3, pubKey2, chatMessage, isBlack, isWhite, amount] = rest;
-        // Logic to handle chat message
-        const chatPayload = createMessage("chat", [gameCode3, pubKey2, chatMessage, isBlack, isWhite, amount]);
-        broadcastToGame(gameCode3, chatPayload);
         break;
       default:
         console.log("Unknown cmd");
@@ -168,24 +185,5 @@ function startGame(gameCode) {
 
   activeGameIds.push(gameCode);
 }
-
-// Broadcasts a message to all players in a game
-function broadcastToGame (gameCode, message) {
-  const game = games[gameCode];
-  if (game) {
-    const payload = JSON.stringify(message);
-    // Sending message to all players and observers in the game
-    game.players.forEach(client => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(payload);
-      }
-    });
-    (game.observers || []).forEach(observer => {
-      if (observer.readyState === WebSocket.OPEN) {
-        observer.send(payload);
-      }
-    });
-  }
-};
 
 console.log("WebSocket server started on ws://127.0.0.1:3000");
