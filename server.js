@@ -1,7 +1,36 @@
 const WebSocket = require("ws");
 const { Chess } = require("chess.js");
+require("dotenv").config();
+const { ethers } = require("ethers");
 
-const wss = new WebSocket.Server({ port: 3000 });
+const PORT = 3000;
+const RPC_URL = process.env.RPC_URL;
+const PRIVATE_KEY = process.env.PRIVATE_KEY;
+const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;
+const ABI = [
+  {
+    inputs: [
+      { internalType: "uint256", name: "game", type: "uint256" },
+      { internalType: "address", name: "winner", type: "address" },
+    ],
+    name: "declareWinner",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "uint256", name: "gameId", type: "uint256" }],
+    name: "returnWagers",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+];
+const provider = ethers.getDefaultProvider(RPC_URL);
+const signer = new ethers.Wallet(PRIVATE_KEY, provider);
+let contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
+
+const wss = new WebSocket.Server({ port: PORT });
 
 // Helper function to create message strings
 const createMessage = (cmd, args) => {
@@ -84,45 +113,54 @@ wss.on("connection", function connection(ws) {
           currentGame.observers.forEach((observer) => {
             observer.send(createMessage("stream", [gameCode1, fen]));
           });
+
+          // Check if the game is over
+          if (currentGame.chess.isGameOver()) {
+            console.log(`Game ${gameCode1} is over.`);
+            let winnerPubKey = null;
+            if (currentGame.chess.isCheckmate()) {
+              console.log(`checkmate`);
+              // Determine the winner based on who is not in check
+              const winnerIsWhite = currentGame.chess.turn() === "w" ? 0 : 1; // 'w' means white just moved and put black in checkmate, so black (1) loses
+              if (winnerIsWhite) {
+                console.log(`winnerIsWhite`);
+                winnerPubKey = currentGame.whitePubKey;
+              } else {
+                console.log(`winnerIsBlack`);
+                winnerPubKey = currentGame.blackPubKey;
+              }
+
+              console.log(`winner: ${winnerPubKey}`);
+              // Call the blockchain function if there's a winner
+              if (winnerPubKey) {
+                console.log(`calling declareWinnerOnBlockchain`);
+                declareWinnerOnBlockchain(gameCode1, winnerPubKey);
+              }
+            } else if (
+              currentGame.chess.isDraw() ||
+              currentGame.chess.isStalemate() ||
+              currentGame.chess.isThreefoldRepetition()
+            ) {
+              console.log(`draw`);
+              returnWagersOnBlockchain(gameCode1);
+            }
+          }
         } else {
           ws.send(createMessage("error", ["Invalid move or game code."]));
         }
         break;
 
       case "get_active_games":
-        if (activeGameIds.length > 0) {
-          activeGameIds.forEach((gameId) => {
-            const gameInfo = games[gameId];
-            if (gameInfo) {
-              ws.send(
-                createMessage("active", [
-                  gameId,
-                  gameInfo.pubKeys[0],
-                  gameInfo.pubKeys[1],
-                ])
-              );
-            }
-          });
-        } else {
+        const activeGameId = activeGameIds[activeGameIds.length - 1];
+        if (activeGameId) {
+          const gameInfo = games[activeGameId];
           ws.send(
-            createMessage("no_active_games", ["No active games at the moment."])
+            createMessage("active", [
+              activeGameId,
+              gameInfo.pubKeys[0],
+              gameInfo.pubKeys[1],
+            ])
           );
-        }
-        break;
-
-      case "game_over":
-        const [gameCodeOver] = rest;
-        // Find the index of the game code in the active games array
-        const index = activeGameIds.indexOf(gameCodeOver);
-        if (index !== -1) {
-          // If the game code is found, remove it from the active games array
-          activeGameIds.splice(index, 1);
-          console.log(
-            `Game ${gameCodeOver} is over and removed from active games.`
-          );
-        } else {
-          // If the game code is not found, possibly log or handle the error
-          console.log(`Game ${gameCodeOver} not found in active games.`);
         }
         break;
 
@@ -143,6 +181,20 @@ wss.on("connection", function connection(ws) {
         } else {
           ws.send(createMessage("error", ["Game does not exist."]));
         }
+        break;
+      case "chat":
+        const [gameCode3, pubKey2, chatMessage, isBlack, isWhite, amount] =
+          rest;
+        // Logic to handle chat message
+        const chatPayload = createMessage("chat", [
+          gameCode3,
+          pubKey2,
+          chatMessage,
+          isBlack,
+          isWhite,
+          amount,
+        ]);
+        broadcastToGame(gameCode3, chatPayload);
         break;
       default:
         console.log("Unknown cmd");
@@ -168,9 +220,15 @@ function startGame(gameCode) {
     const color = (isFirstPlayerWhite ? index === 0 : index !== 0) ? 0 : 1;
 
     if (isFirstPlayerWhite) {
+      console.log(`firstPlayerIsWhite`);
+      console.log(`whitePubKey: ${game.pubKeys[0]}`);
+      console.log(`blackPubKey: ${game.pubKeys[1]}`);
       game.whitePubKey = game.pubKeys[0];
       game.blackPubKey = game.pubKeys[1];
     } else {
+      console.log(`firstPlayerIsBlack`);
+      console.log(`whitePubKey: ${game.pubKeys[1]}`);
+      console.log(`blackPubKey: ${game.pubKeys[0]}`);
       game.whitePubKey = game.pubKeys[1];
       game.blackPubKey = game.pubKeys[0];
     }
@@ -186,4 +244,47 @@ function startGame(gameCode) {
   activeGameIds.push(gameCode);
 }
 
-console.log("WebSocket server started on ws://127.0.0.1:3000");
+// Broadcasts a message to all players in a game
+function broadcastToGame(gameCode, message) {
+  const game = games[gameCode];
+  if (game) {
+    const payload = JSON.stringify(message);
+    // Sending message to all players and observers in the game
+    game.players.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(payload);
+      }
+    });
+    (game.observers || []).forEach((observer) => {
+      if (observer.readyState === WebSocket.OPEN) {
+        observer.send(payload);
+      }
+    });
+  }
+}
+
+// Function to declare the winner on the blockchain
+async function declareWinnerOnBlockchain(gameId, winnerAddress) {
+  try {
+    const tx = await contract.declareWinner(gameId, winnerAddress);
+    console.log("Transaction submitted:", tx.hash);
+    const receipt = await tx.wait();
+    console.log("Transaction confirmed:", receipt.blockNumber);
+  } catch (error) {
+    console.error("Failed to declare winner on blockchain:", error);
+  }
+}
+
+// Function to return wagers on the blockchain
+async function returnWagersOnBlockchain(gameId) {
+  try {
+    const tx = await contract.returnWagers(gameId);
+    console.log("Transaction submitted:", tx.hash);
+    const receipt = await tx.wait();
+    console.log("Transaction confirmed:", receipt.blockNumber);
+  } catch (error) {
+    console.error("Failed to return wagers on blockchain:", error);
+  }
+}
+
+console.log(`WebSocket server started on ws://127.0.0.1:${PORT}`);

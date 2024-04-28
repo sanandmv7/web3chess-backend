@@ -1,6 +1,7 @@
 const WebSocket = require("ws");
 
-const wss = new WebSocket.Server({ port: 3000 });
+const PORT = 3000;
+const wss = new WebSocket.Server({ port: PORT });
 
 // Helper function to create message strings
 const createMessage = (cmd, args) => {
@@ -8,6 +9,7 @@ const createMessage = (cmd, args) => {
 };
 
 const games = {}; // Store game states
+let activeGameIds = [];
 
 wss.on("connection", function connection(ws) {
   console.log("A new client connected!");
@@ -38,6 +40,20 @@ wss.on("connection", function connection(ws) {
       case "chat":
         const [gameCode, pubKey, chatMessage, isBlack, isWhite, amount, ts] =
           rest;
+        // if (!games[gameCode]) {
+        //     games[gameCode] = {
+        //         players: [ws],
+        //         pubKeys: [pubKey],
+        //         messageCached: createMessage("chat", [gameCode, pubKey, chatMessage, isBlack, isWhite, amount]),
+        //     }
+        // } else {
+        //     const game = games[gameCode];
+        //     if (game.players.length < 2) {
+        //         game.players.push(ws);
+        //         game.pubKeys.push(pubKey);
+        //         ws.send(game.messageCached);
+        //     }
+        // }
         // Logic to handle chat message
         const chatPayload = createMessage("chat", [
           gameCode,
@@ -66,13 +82,19 @@ wss.on("connection", function connection(ws) {
 function broadcastToGame(gameCode, message) {
   const game = games[gameCode];
   if (game) {
+    // const payload = JSON.stringify(message);
     // Sending message to all players and observers in the game
     game.players.forEach((client) => {
       if (client.readyState === WebSocket.OPEN) {
         client.send(message);
       }
     });
+    // (game.observers || []).forEach(observer => {
+    //   if (observer.readyState === WebSocket.OPEN) {
+    //     observer.send(payload);
+    //   }
+    // });
   }
 }
 
-console.log("WebSocket server started on ws://127.0.0.1:3000");
+console.log(`WebSocket server started on ws://127.0.0.1:${PORT}`);
