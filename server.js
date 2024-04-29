@@ -40,6 +40,8 @@ const createMessage = (cmd, args) => {
 const games = {}; // Store game states
 let activeGameIds = [];
 
+console.log(`RPC_URL: ${RPC_URL}`);
+
 wss.on("connection", function connection(ws) {
   console.log("A new client connected!");
 
